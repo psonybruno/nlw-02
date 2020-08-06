@@ -12,30 +12,42 @@ export default class ClassesController
 {
     async index(request: Request, response: Response)
     {
-        const filters = request.query;
+        try {
+            const filters = request.query;
 
-        if(filters.week_day || filters.subject || filters.time){
-            return response.status(400).json({error: "Filters not found"})
+            const subject = filters.subject as string;
+            const time = filters.time as string;
+            const week_day = filters.weekDay as string;
+
+            if(!week_day || !subject || !time){
+                return response.status(400).json({error: "Filters not found"})
+            }
+
+            const timeInMinutes = convertHourToMinutes(filters.time as string);
+
+            const classes = await db('classes')
+                .whereExists(function(){
+                    this.select('class_schedule.*')
+                    .from('class_schedule')
+                    .whereRaw('`class_schedule`.`class_id` = `classes`.`id`')
+                    .whereRaw('`class_schedule`.`week_day` = ??', [Number(week_day)])
+                    .whereRaw('`class_schedule`.`from` <= ??', [timeInMinutes])
+                    .whereRaw('`class_schedule`.`to` > ??', [timeInMinutes])
+                })
+                .where('classes.subject', '=', subject)
+                .join('users', 'classes.user_id', '=', 'users.id')
+                .select(['classes.*', 'users.*']);
+
+            if (classes.length > 0){
+                return response.status(200).json(classes);
+            }else{
+                return response.status(200).json({});
+            }
+
+        } catch (error) {
+            console.log(error)
+            return response.status(404).json({msg: "Can't filter"});
         }
-
-        const subject = filters.subject as string;
-        const time = filters.time as string;
-        const week_day = filters.week_day as string;
-
-        const timeInMinutes = convertHourToMinutes(filters.time as string);
-
-        const classes = await db('classes')
-            .whereExists(function(){
-                this.select('class_schedule.*')
-                .from('class_schedule')
-                .whereRaw('`class_schedule`.`class_id` = `classes.id`')
-                .whereRaw('`class_schedule`.`week_day` = ??', [Number(week_day)])
-                .whereRaw('`class_schedule`.`from` <= ??', [timeInMinutes])
-                .whereRaw('`class_schedule`.`from` > ??', [timeInMinutes])
-            })
-            .where('classes.subject', '=', subject)
-            .join('users', 'classes.user_id', '=', 'users.id')
-            .select(['classes.*', 'users.*']);
 
     }
 
@@ -52,6 +64,8 @@ export default class ClassesController
         } = request.body;
 
         const trx = await db.transaction();
+
+        console.log(name)
 
         try {
 
@@ -90,7 +104,7 @@ export default class ClassesController
         } catch (error) {
             trx.rollback();
             console.log(error);
-            return response.send(404).json({error: "unexpected error"})
+            return response.status(404).json({error: "unexpected error"})
         }
 
 
